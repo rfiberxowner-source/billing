@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "RFiberX",
+    "slug": "rfiberx",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.rfiberx.technician",
+      "adaptiveIcon": {
+        "backgroundColor": "#0F1923",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-status-bar"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "48f32c2c-5ed5-4c9d-8dec-747f97d36dd5"
+      }
+    }
+  }
+}
