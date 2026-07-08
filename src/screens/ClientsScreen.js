@@ -11,6 +11,7 @@ import {
   Platform,
   Alert,
   Linking,
+  TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
@@ -18,7 +19,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, GRADIENT_ACCENT, GRADIENT_BRAND } from '../constants/colors';
 import { FONTS, SPACING, RADIUS } from '../constants/typography';
-import { getClients } from '../utils/storage';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../config/firebase';
 import LoadingOverlay from '../components/LoadingOverlay';
 
 export default function ClientsScreen({ navigation, route }) {
@@ -28,6 +30,9 @@ export default function ClientsScreen({ navigation, route }) {
   const [clients, setClients] = useState([]);
   const [selectedClient, setSelectedClient] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [filterModalVisible, setFilterModalVisible] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedPlanFilter, setSelectedPlanFilter] = useState(null);
   const [filterByUser, setFilterByUser] = useState(null);
   const [isFetching, setIsFetching] = useState(true);
 
@@ -42,8 +47,20 @@ export default function ClientsScreen({ navigation, route }) {
   const loadClients = useCallback(async () => {
     setIsFetching(true);
     try {
-      const data = await getClients();
-      setClients(data);
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const fetchedClients = [];
+      usersSnap.forEach(doc => {
+        fetchedClients.push({ id: doc.id, ...doc.data() });
+      });
+      fetchedClients.sort((a, b) => {
+        const dateA = a.createdAt ? new Date(a.createdAt) : new Date(0);
+        const dateB = b.createdAt ? new Date(b.createdAt) : new Date(0);
+        return dateB - dateA;
+      });
+      setClients(fetchedClients);
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Error', 'Failed to fetch clients.');
     } finally {
       setIsFetching(false);
     }
@@ -55,20 +72,55 @@ export default function ClientsScreen({ navigation, route }) {
     }, [loadClients])
   );
 
-  const displayedClients = filterByUser 
-    ? clients.filter(c => c.processedBy === filterByUser)
-    : clients;
+  const displayedClients = clients.filter(c => {
+    let matchesUser = true;
+    if (filterByUser) matchesUser = c.processedBy === filterByUser;
+    
+    let matchesSearch = true;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const fullName = (c.name || `${c.firstName || ''} ${c.lastName || ''}`).toLowerCase();
+      matchesSearch = fullName.includes(q);
+    }
+    
+    let matchesPlan = true;
+    if (selectedPlanFilter) {
+      const p = c.plan || c.Plan;
+      matchesPlan = p === selectedPlanFilter;
+    }
+    
+    return matchesUser && matchesSearch && matchesPlan;
+  });
+
+  const uniquePlans = [...new Set(clients.map(c => c.plan || c.Plan).filter(Boolean))];
 
   const handleCopyDetails = async () => {
     if (!selectedClient) return;
-    const textToCopy = `Job Type: ${selectedClient.jobType || 'Install'}
-Full name: ${selectedClient.firstName} ${selectedClient.lastName}
-Email address: ${selectedClient.email || 'N/A'}
-Phone Number: ${selectedClient.phone}
-City/Municipality: ${selectedClient.city}
-Address: ${selectedClient.address}
-Plan: ${selectedClient.plan} (${selectedClient.price}/mo)
-Notes: ${selectedClient.notes || 'None'}`;
+    
+    let isNew = false;
+    if (selectedClient.createdAt) {
+      const created = new Date(selectedClient.createdAt);
+      if (!isNaN(created.getTime())) {
+        const oneMonthAgo = new Date();
+        oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+        isNew = created > oneMonthAgo;
+      }
+    }
+    
+    const fullName = selectedClient.name || `${selectedClient.firstName || ''} ${selectedClient.lastName || ''}`.trim() || 'TBD';
+    let textToCopy = `Full name: ${fullName}
+Email address: ${selectedClient.email || 'TBD'}
+Phone Number: ${selectedClient.phone || selectedClient.contactNumber || 'TBD'}
+Address: ${[selectedClient.address, selectedClient.city].filter(Boolean).join(', ') || 'TBD'}
+Plan: ${selectedClient.plan || selectedClient.Plan || 'TBD'}
+Facebook: ${selectedClient.facebook || selectedClient.fbName || 'TBD'}`;
+
+    if (isNew) {
+      textToCopy = `Job Type: ${selectedClient.jobType || 'TBD'}\n` + textToCopy + `\nDate Saved: ${new Date(selectedClient.createdAt).toLocaleString()}`;
+    }
+    if (selectedClient.notes) {
+      textToCopy += `\nNotes: ${selectedClient.notes}`;
+    }
     
     await Clipboard.setStringAsync(textToCopy);
     Alert.alert('Copied to Clipboard', 'You can now paste the details to your messenger.');
@@ -85,7 +137,21 @@ Notes: ${selectedClient.notes || 'None'}`;
   };
 
   const renderClientItem = ({ item }) => {
-    const dateStr = item.createdAt ? `${new Date(item.createdAt).toLocaleDateString()} ${new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '';
+    let isNew = false;
+    if (item.createdAt) {
+      const created = new Date(item.createdAt);
+      if (!isNaN(created.getTime())) {
+        const oneMonthAgo = new Date();
+        oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+        isNew = created > oneMonthAgo;
+      }
+    }
+    const dateStr = isNew && item.createdAt ? `${new Date(item.createdAt).toLocaleDateString()} ${new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '';
+    const fullName = item.name || `${item.firstName || ''} ${item.lastName || ''}`.trim() || '?';
+    const initial1 = fullName.split(' ')[0]?.[0] || '';
+    const initial2 = fullName.split(' ')[1]?.[0] || '';
+    const initials = (initial1 + initial2).toUpperCase();
+
     return (
       <TouchableOpacity 
         style={styles.clientCard} 
@@ -102,15 +168,22 @@ Notes: ${selectedClient.notes || 'None'}`;
           style={styles.avatar}
         >
           <Text style={styles.avatarText}>
-            {item.firstName?.[0]}{item.lastName?.[0]}
+            {initials}
           </Text>
         </LinearGradient>
         
         <View style={styles.clientInfo}>
-          <Text style={styles.clientName}>{item.firstName} {item.lastName}</Text>
-          <Text style={styles.clientPlan}>{item.plan} Plan</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={styles.clientName}>{fullName}</Text>
+            <View style={[styles.statusBadge, { backgroundColor: isNew ? 'rgba(74, 194, 154, 0.1)' : 'rgba(148, 163, 184, 0.1)' }]}>
+              <Text style={[styles.statusBadgeText, { color: isNew ? COLORS.brandGreen : COLORS.textMuted }]}>
+                {isNew ? 'New' : 'Old'}
+              </Text>
+            </View>
+          </View>
+          <Text style={styles.clientPlan}>{item.plan || item.Plan || 'TBD'} Plan</Text>
         </View>
-        <Text style={styles.clientDate}>{dateStr}</Text>
+        {isNew && <Text style={styles.clientDate}>{dateStr}</Text>}
       </TouchableOpacity>
     );
   };
@@ -123,23 +196,43 @@ Notes: ${selectedClient.notes || 'None'}`;
       <View style={styles.searchContainer}>
         <View style={styles.searchBar}>
           <Ionicons name="search-outline" size={18} color={COLORS.textMuted} />
-          <Text style={styles.searchPlaceholder}>Search clients...</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search clients..."
+            placeholderTextColor={COLORS.textMuted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery ? (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Ionicons name="close-circle" size={18} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          ) : null}
         </View>
         <TouchableOpacity
           style={styles.addButton}
           activeOpacity={0.7}
-          onPress={() => navigation.navigate('SelectPlan')}
+          onPress={() => setFilterModalVisible(true)}
         >
           <LinearGradient
             colors={GRADIENT_ACCENT}
             style={styles.addButtonGradient}
           >
-            <Ionicons name="add" size={22} color={COLORS.bgPrimary} />
+            <Ionicons name="filter" size={22} color={COLORS.bgPrimary} />
           </LinearGradient>
         </TouchableOpacity>
       </View>
 
-      {/* Filter Banner */}
+      {/* Filter Banners */}
+      {selectedPlanFilter ? (
+        <View style={[styles.filterBanner, { marginBottom: 8 }]}>
+          <Ionicons name="pricetag" size={16} color={COLORS.brandGreen} />
+          <Text style={styles.filterBannerText}>Plan: {selectedPlanFilter}</Text>
+          <TouchableOpacity onPress={() => setSelectedPlanFilter(null)}>
+            <Ionicons name="close-circle" size={20} color={COLORS.textMuted} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
       {filterByUser ? (
         <View style={styles.filterBanner}>
           <Ionicons name="filter" size={16} color={COLORS.brandGreen} />
@@ -184,6 +277,41 @@ Notes: ${selectedClient.notes || 'None'}`;
           </TouchableOpacity>
         </View>
       )}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={filterModalVisible}
+        onRequestClose={() => setFilterModalVisible(false)}
+      >
+        <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center' }]}>
+          <View style={[styles.modalContent, { width: '80%', paddingBottom: SPACING.xl, borderRadius: RADIUS.xl }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Filter by Plan</Text>
+              <TouchableOpacity onPress={() => setFilterModalVisible(false)}>
+                <Ionicons name="close" size={20} color={COLORS.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={{ maxHeight: 300 }}>
+              <TouchableOpacity
+                style={[styles.planFilterOption, !selectedPlanFilter && styles.planFilterOptionActive]}
+                onPress={() => { setSelectedPlanFilter(null); setFilterModalVisible(false); }}
+              >
+                <Text style={[styles.planFilterText, !selectedPlanFilter && styles.planFilterTextActive]}>All Plans</Text>
+              </TouchableOpacity>
+              {uniquePlans.map(plan => (
+                <TouchableOpacity
+                  key={plan}
+                  style={[styles.planFilterOption, selectedPlanFilter === plan && styles.planFilterOptionActive]}
+                  onPress={() => { setSelectedPlanFilter(plan); setFilterModalVisible(false); }}
+                >
+                  <Text style={[styles.planFilterText, selectedPlanFilter === plan && styles.planFilterTextActive]}>{plan}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       {/* Client Details Modal */}
       <Modal
         animationType="slide"
@@ -213,24 +341,74 @@ Notes: ${selectedClient.notes || 'None'}`;
                     style={styles.modalAvatarContainer}
                   >
                     <Text style={styles.modalAvatarText}>
-                      {selectedClient.firstName?.[0]}{selectedClient.lastName?.[0]}
+                      {(selectedClient.name || `${selectedClient.firstName || ''} ${selectedClient.lastName || ''}`).trim()[0]?.toUpperCase() || '?'}
                     </Text>
                   </LinearGradient>
+                  
+                  {(() => {
+                    let isNew = false;
+                    if (selectedClient.createdAt) {
+                      const created = new Date(selectedClient.createdAt);
+                      if (!isNaN(created.getTime())) {
+                        const oneMonthAgo = new Date();
+                        oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+                        isNew = created > oneMonthAgo;
+                      }
+                    }
+                    return (
+                      <View style={[styles.statusBadge, { backgroundColor: isNew ? 'rgba(74, 194, 154, 0.1)' : 'rgba(148, 163, 184, 0.1)', marginBottom: 8 }]}>
+                        <Text style={[styles.statusBadgeText, { color: isNew ? COLORS.brandGreen : COLORS.textMuted }]}>
+                          {isNew ? 'New Account' : 'Old Account'}
+                        </Text>
+                      </View>
+                    );
+                  })()}
+
                   <Text style={styles.modalProfileName}>
-                    {selectedClient.firstName} {selectedClient.lastName}
+                    {selectedClient.name || `${selectedClient.firstName || ''} ${selectedClient.lastName || ''}`.trim() || 'TBD'}
                   </Text>
-                  <Text style={styles.modalProfilePlan}>{selectedClient.plan} Plan</Text>
+                  <Text style={styles.modalProfilePlan}>{selectedClient.plan || selectedClient.Plan || 'TBD'} Plan</Text>
                 </View>
 
                 <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
                   <View style={styles.detailSection}>
                     <View style={styles.detailRow}>
                       <View style={styles.detailIconWrapper}>
+                        <Ionicons name="card-outline" size={18} color={COLORS.brandGreen} />
+                      </View>
+                      <View style={styles.detailTextContainer}>
+                        <Text style={styles.detailLabel}>Account Number</Text>
+                        <Text style={styles.detailValue}>{selectedClient.accountNumber || selectedClient.account || 'TBD'}</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.detailRow}>
+                      <View style={styles.detailIconWrapper}>
+                        <Ionicons name="wifi-outline" size={18} color={COLORS.brandGreen} />
+                      </View>
+                      <View style={styles.detailTextContainer}>
+                        <Text style={styles.detailLabel}>Internet Plan</Text>
+                        <Text style={styles.detailValue}>{selectedClient.plan || selectedClient.Plan || 'TBD'}</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.detailRow}>
+                      <View style={styles.detailIconWrapper}>
+                        <Ionicons name="logo-facebook" size={18} color={COLORS.brandGreen} />
+                      </View>
+                      <View style={styles.detailTextContainer}>
+                        <Text style={styles.detailLabel}>Facebook Name</Text>
+                        <Text style={styles.detailValue}>{selectedClient.facebook || selectedClient.fbName || 'TBD'}</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.detailRow}>
+                      <View style={styles.detailIconWrapper}>
                         <Ionicons name="mail-outline" size={18} color={COLORS.brandGreen} />
                       </View>
                       <View style={styles.detailTextContainer}>
                         <Text style={styles.detailLabel}>Email</Text>
-                        <Text style={styles.detailValue}>{selectedClient.email || 'Not provided'}</Text>
+                        <Text style={styles.detailValue}>{selectedClient.email || 'TBD'}</Text>
                       </View>
                     </View>
 
@@ -240,7 +418,7 @@ Notes: ${selectedClient.notes || 'None'}`;
                       </View>
                       <View style={styles.detailTextContainer}>
                         <Text style={styles.detailLabel}>Phone Number</Text>
-                        <Text style={styles.detailValue}>{selectedClient.phone}</Text>
+                        <Text style={styles.detailValue}>{selectedClient.phone || selectedClient.contactNumber || 'TBD'}</Text>
                       </View>
                     </View>
 
@@ -250,29 +428,47 @@ Notes: ${selectedClient.notes || 'None'}`;
                       </View>
                       <View style={styles.detailTextContainer}>
                         <Text style={styles.detailLabel}>Address</Text>
-                        <Text style={styles.detailValue}>{selectedClient.address}, {selectedClient.city}</Text>
+                        <Text style={styles.detailValue}>{[selectedClient.address, selectedClient.city].filter(Boolean).join(', ') || 'TBD'}</Text>
                       </View>
                     </View>
 
-                    <View style={styles.detailRow}>
-                      <View style={styles.detailIconWrapper}>
-                        <Ionicons name="build-outline" size={18} color={COLORS.brandGreen} />
-                      </View>
-                      <View style={styles.detailTextContainer}>
-                        <Text style={styles.detailLabel}>Job Type</Text>
-                        <Text style={styles.detailValue}>{selectedClient.jobType || 'Install'}</Text>
-                      </View>
-                    </View>
+                    {(() => {
+                      let isNew = false;
+                      if (selectedClient.createdAt) {
+                        const created = new Date(selectedClient.createdAt);
+                        if (!isNaN(created.getTime())) {
+                          const oneMonthAgo = new Date();
+                          oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+                          isNew = created > oneMonthAgo;
+                        }
+                      }
+                      
+                      if (!isNew) return null;
+                      
+                      return (
+                        <>
+                          <View style={styles.detailRow}>
+                            <View style={styles.detailIconWrapper}>
+                              <Ionicons name="build-outline" size={18} color={COLORS.brandGreen} />
+                            </View>
+                            <View style={styles.detailTextContainer}>
+                              <Text style={styles.detailLabel}>Job Type</Text>
+                              <Text style={styles.detailValue}>{selectedClient.jobType || 'TBD'}</Text>
+                            </View>
+                          </View>
 
-                    <View style={styles.detailRow}>
-                      <View style={styles.detailIconWrapper}>
-                        <Ionicons name="calendar-outline" size={18} color={COLORS.brandGreen} />
-                      </View>
-                      <View style={styles.detailTextContainer}>
-                        <Text style={styles.detailLabel}>Date Saved</Text>
-                        <Text style={styles.detailValue}>{new Date(selectedClient.createdAt).toLocaleString()}</Text>
-                      </View>
-                    </View>
+                          <View style={styles.detailRow}>
+                            <View style={styles.detailIconWrapper}>
+                              <Ionicons name="calendar-outline" size={18} color={COLORS.brandGreen} />
+                            </View>
+                            <View style={styles.detailTextContainer}>
+                              <Text style={styles.detailLabel}>Date Saved</Text>
+                              <Text style={styles.detailValue}>{new Date(selectedClient.createdAt).toLocaleString()}</Text>
+                            </View>
+                          </View>
+                        </>
+                      );
+                    })()}
 
                     {selectedClient.processedBy ? (
                       <View style={styles.detailRow}>
@@ -361,6 +557,13 @@ const getStyles = (COLORS) => StyleSheet.create({
     fontSize: FONTS.sizes.md,
     marginLeft: SPACING.sm,
   },
+  searchInput: {
+    flex: 1,
+    color: COLORS.textPrimary,
+    fontSize: FONTS.sizes.md,
+    marginLeft: SPACING.sm,
+    padding: 0,
+  },
   addButton: {
     borderRadius: RADIUS.md,
     overflow: 'hidden',
@@ -405,6 +608,16 @@ const getStyles = (COLORS) => StyleSheet.create({
     color: COLORS.textPrimary,
     fontSize: FONTS.sizes.md,
     fontWeight: FONTS.weights.semibold,
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  statusBadgeText: {
+    fontSize: 10,
+    fontWeight: FONTS.weights.bold,
+    textTransform: 'uppercase',
   },
   clientPlan: {
     color: COLORS.textMuted,
@@ -645,5 +858,22 @@ const getStyles = (COLORS) => StyleSheet.create({
     color: COLORS.textPrimary,
     fontSize: FONTS.sizes.md,
     fontWeight: FONTS.weights.bold,
+  },
+  planFilterOption: {
+    paddingVertical: SPACING.md,
+    paddingHorizontal: SPACING.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
+  },
+  planFilterOptionActive: {
+    backgroundColor: 'rgba(74, 194, 154, 0.1)',
+  },
+  planFilterText: {
+    fontSize: FONTS.sizes.md,
+    color: COLORS.textPrimary,
+  },
+  planFilterTextActive: {
+    fontWeight: FONTS.weights.bold,
+    color: COLORS.brandGreen,
   },
 });
