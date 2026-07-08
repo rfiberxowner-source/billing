@@ -1,0 +1,29 @@
+import React from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+import { useTheme } from '../context/ThemeContext';
+import { FONTS, SPACING } from '../constants/typography';
+
+export default function BillingScreen() {
+  const { colors: COLORS } = useTheme();
+
+  return (
+    <View style={[styles.container, { backgroundColor: COLORS.bgPrimary }]}>
+      <Text style={[styles.text, { color: COLORS.textPrimary }]}>
+        Billing Screen
+      </Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: SPACING.lg,
+  },
+  text: {
+    fontSize: FONTS.sizes.lg,
+    fontWeight: FONTS.weights.medium,
+  },
+});

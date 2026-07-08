@@ -22,6 +22,7 @@ const MENU_ITEMS = [
   { id: 'clients', label: 'Clients', icon: 'people-outline', screen: 'Clients' },
   { id: 'add-client', label: 'Add Client', icon: 'person-add-outline', screen: 'SelectPlan' },
   { id: 'payment-info', label: 'Payment Info', icon: 'card-outline', screen: 'Payment' },
+  { id: 'billing', label: 'Billing', icon: 'receipt-outline', screen: 'Billing' },
   { id: 'plans', label: 'Plans', icon: 'pricetag-outline', screen: 'Plans' },
   { id: 'settings', label: 'Settings', icon: 'settings-outline', screen: 'Settings' },
 ];

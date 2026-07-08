@@ -15,6 +15,7 @@ import PaymentScreen from '../screens/PaymentScreen';
 import AccountScreen from '../screens/AccountScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import PlansScreen from '../screens/PlansScreen';
+import BillingScreen from '../screens/BillingScreen';
 
 import LoginScreen from '../screens/auth/LoginScreen';
 import SignupScreen from '../screens/auth/SignupScreen';
@@ -57,6 +58,7 @@ const AddClientWithHeader = withHeader(AddClientScreen, 'New Client');
 const AccountWithHeader = withHeader(AccountScreen, 'Account');
 const PlansWithHeader = withHeader(PlansScreen, 'Plans');
 const SettingsWithHeader = withHeader(SettingsScreen, 'Settings');
+const BillingWithHeader = withHeader(BillingScreen, 'Billing');
 
 export default function AppNavigator() {
   const { colors: themeColors } = useTheme();
@@ -134,6 +136,7 @@ export default function AppNavigator() {
       <Drawer.Screen name="Payment" component={PaymentScreen} />
       <Drawer.Screen name="Account" component={AccountWithHeader} />
       <Drawer.Screen name="Plans" component={PlansWithHeader} />
+      <Drawer.Screen name="Billing" component={BillingWithHeader} />
       <Drawer.Screen name="Settings" component={SettingsWithHeader} />
     </Drawer.Navigator>
   );
